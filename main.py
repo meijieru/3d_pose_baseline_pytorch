@@ -311,7 +311,7 @@ def test(test_loader,
         targets_use = targets_unnorm[:, dim_use]
 
         if refine_dic is not None:
-            outputs_use = ru.refine(outputs_use, refine_dic, refine_coeff_fun)
+            outputs_use, _ = ru.refine(outputs_use, refine_dic, refine_coeff_fun)
 
         if procrustes:
             for ba in range(inps.size(0)):
