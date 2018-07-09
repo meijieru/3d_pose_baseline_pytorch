@@ -69,6 +69,7 @@ class Options:
         self.parser.set_defaults(max_norm=True)
         self.parser.add_argument('--procrustes',     dest='procrustes', action='store_true', help='use procrustes analysis at testing')
         self.parser.add_argument('--refine_dir',     type=str, help='directory of simplices for refinement')
+        self.parser.add_argument('--refine_method',  type=str, help='method to compute the coefficient, use train config if not set')
 
     def _print(self):
         print("\n==================Options=================")

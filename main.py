@@ -80,6 +80,27 @@ def main(opt):
     stat_3d = torch.load(os.path.join(opt.data_dir, 'stat_3d.pth.tar'))
     # test
     if opt.test:
+        if opt.refine_dir:
+            refine_dir = os.path.join(opt.refine_dir, 'train')
+            refine_dic_path = os.path.join(refine_dir, 'D.pkl')
+            with open(refine_dic_path, 'rb') as f:
+                refine_dic = pickle.load(f)['D']
+
+            refine_config = ru.get_refine_config(refine_dir)
+            refine_per_action = refine_config['per_action']
+
+            if opt.refine_method:
+                method = opt.refine_method
+                method_params = None
+            else:  # fallback to training params
+                method = refine_config['method']
+                method_params = refine_config['method_params']
+            refine_coeff_fun = ru.get_coeff_fun(method, method_params)
+        else:
+            refine_dic = None
+            refine_per_action = False
+            refine_coeff_fun = None
+
         err_set = []
         for action in actions:
             print(">>> TEST on _{}_".format(action))
@@ -93,13 +114,18 @@ def main(opt):
                 shuffle=False,
                 num_workers=opt.job,
                 pin_memory=True)
+
+            refine_idx_action = ru.get_idx_action(action)
+            refine_dic_i = refine_dic[
+                refine_idx_action] if refine_per_action else refine_dic
             _, err_test = test(
                 test_loader,
                 model,
                 criterion,
                 stat_3d,
                 procrustes=opt.procrustes,
-                refine_dir=opt.refine_dir)
+                refine_dic=refine_dic_i,
+                refine_coeff_fun=refine_coeff_fun)
             err_set.append(err_test)
         print(">>>>>> TEST results:")
         for action in actions:
@@ -148,12 +174,7 @@ def main(opt):
             gamma=opt.lr_gamma,
             max_norm=opt.max_norm)
         loss_test, err_test = test(
-            test_loader,
-            model,
-            criterion,
-            stat_3d,
-            procrustes=opt.procrustes,
-            refine_dir=opt.refine_dir)
+            test_loader, model, criterion, stat_3d, procrustes=opt.procrustes)
 
         # update log file
         logger.append([epoch + 1, lr_now, loss_train, loss_test, err_test],
@@ -250,7 +271,8 @@ def test(test_loader,
          criterion,
          stat_3d,
          procrustes=False,
-         refine_dir=None):
+         refine_dic=None,
+         refine_coeff_fun=None):
     losses = utils.AverageMeter()
 
     model.eval()
@@ -259,11 +281,6 @@ def test(test_loader,
     start = time.time()
     batch_time = 0
     bar = Bar('>>>', fill='>', max=len(test_loader))
-
-    if refine_dir:
-        refine_dic_path = os.path.join(refine_dir, 'train', 'D.pkl')
-        with open(refine_dic_path, 'rb') as f:
-            refine_dic = pickle.load(f)['D']
 
     for i, (inps, tars) in enumerate(test_loader):
         inputs = Variable(inps.cuda())
@@ -293,8 +310,8 @@ def test(test_loader,
         outputs_use = outputs_unnorm[:, dim_use]
         targets_use = targets_unnorm[:, dim_use]
 
-        if refine_dir:
-            outputs_use = ru.refine(outputs_use, refine_dic)
+        if refine_dic is not None:
+            outputs_use = ru.refine(outputs_use, refine_dic, refine_coeff_fun)
 
         if procrustes:
             for ba in range(inps.size(0)):
