@@ -68,6 +68,7 @@ class Options:
         self.parser.add_argument('--max',            dest='max_norm', action='store_true', help='if use max_norm clip on grad')
         self.parser.set_defaults(max_norm=True)
         self.parser.add_argument('--procrustes',     dest='procrustes', action='store_true', help='use procrustes analysis at testing')
+        self.parser.add_argument('--refine_dir',     type=str, help='directory of simplices for refinement')
 
     def _print(self):
         print("\n==================Options=================")

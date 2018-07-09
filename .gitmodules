@@ -1,3 +1,6 @@
 [submodule "src/progress"]
 	path = src/progress
 	url = https://github.com/verigak/progress.git
+[submodule "approximate_archetypal_analysis"]
+	path = approximate_archetypal_analysis
+	url = git@github.com:meijieru/approximate_archetypal_analysis.git

@@ -5,6 +5,7 @@ from __future__ import print_function, absolute_import, division
 import os
 import sys
 import time
+import pickle
 from pprint import pprint
 import numpy as np
 
@@ -26,6 +27,8 @@ import src.log as log
 from src.model import LinearModel, weight_init
 from src.datasets.human36m import Human36M
 
+import refine_utils as ru
+
 
 def main(opt):
     start_epoch = 0
@@ -41,7 +44,8 @@ def main(opt):
     model = LinearModel()
     model = model.cuda()
     model.apply(weight_init)
-    print(">>> total params: {:.2f}M".format(sum(p.numel() for p in model.parameters()) / 1000000.0))
+    print(">>> total params: {:.2f}M".format(
+        sum(p.numel() for p in model.parameters()) / 1000000.0))
     criterion = nn.MSELoss(size_average=True).cuda()
     optimizer = torch.optim.Adam(model.parameters(), lr=opt.lr)
 
@@ -55,7 +59,8 @@ def main(opt):
         lr_now = ckpt['lr']
         model.load_state_dict(ckpt['state_dict'])
         optimizer.load_state_dict(ckpt['optimizer'])
-        print(">>> ckpt loaded (epoch: {} | err: {})".format(start_epoch, err_best))
+        print(">>> ckpt loaded (epoch: {} | err: {})".format(
+            start_epoch, err_best))
     if opt.resume:
         logger = log.Logger(os.path.join(opt.ckpt, 'log.txt'), resume=True)
     else:
@@ -77,33 +82,48 @@ def main(opt):
     if opt.test:
         err_set = []
         for action in actions:
-            print (">>> TEST on _{}_".format(action))
+            print(">>> TEST on _{}_".format(action))
             test_loader = DataLoader(
-                dataset=Human36M(actions=action, data_path=opt.data_dir, use_hg=opt.use_hg, is_train=False),
+                dataset=Human36M(
+                    actions=action,
+                    data_path=opt.data_dir,
+                    use_hg=opt.use_hg,
+                    is_train=False),
                 batch_size=opt.test_batch,
                 shuffle=False,
                 num_workers=opt.job,
                 pin_memory=True)
-            _, err_test = test(test_loader, model, criterion, stat_3d, procrustes=opt.procrustes)
+            _, err_test = test(
+                test_loader,
+                model,
+                criterion,
+                stat_3d,
+                procrustes=opt.procrustes,
+                refine_dir=opt.refine_dir)
             err_set.append(err_test)
-        print (">>>>>> TEST results:")
+        print(">>>>>> TEST results:")
         for action in actions:
-            print ("{}".format(action), end='\t')
-        print ("\n")
+            print("{}".format(action), end='\t')
+        print("\n")
         for err in err_set:
-            print ("{:.4f}".format(err), end='\t')
-        print (">>>\nERRORS: {}".format(np.array(err_set).mean()))
+            print("{:.4f}".format(err), end='\t')
+        print(">>>\nERRORS: {}".format(np.array(err_set).mean()))
         sys.exit()
 
     # load dadasets for training
     test_loader = DataLoader(
-        dataset=Human36M(actions=actions, data_path=opt.data_dir, use_hg=opt.use_hg, is_train=False),
+        dataset=Human36M(
+            actions=actions,
+            data_path=opt.data_dir,
+            use_hg=opt.use_hg,
+            is_train=False),
         batch_size=opt.test_batch,
         shuffle=False,
         num_workers=opt.job,
         pin_memory=True)
     train_loader = DataLoader(
-        dataset=Human36M(actions=actions, data_path=opt.data_dir, use_hg=opt.use_hg),
+        dataset=Human36M(
+            actions=actions, data_path=opt.data_dir, use_hg=opt.use_hg),
         batch_size=opt.train_batch,
         shuffle=True,
         num_workers=opt.job,
@@ -117,10 +137,23 @@ def main(opt):
 
         # per epoch
         glob_step, lr_now, loss_train = train(
-            train_loader, model, criterion, optimizer,
-            lr_init=opt.lr, lr_now=lr_now, glob_step=glob_step, lr_decay=opt.lr_decay, gamma=opt.lr_gamma,
+            train_loader,
+            model,
+            criterion,
+            optimizer,
+            lr_init=opt.lr,
+            lr_now=lr_now,
+            glob_step=glob_step,
+            lr_decay=opt.lr_decay,
+            gamma=opt.lr_gamma,
             max_norm=opt.max_norm)
-        loss_test, err_test = test(test_loader, model, criterion, stat_3d, procrustes=opt.procrustes)
+        loss_test, err_test = test(
+            test_loader,
+            model,
+            criterion,
+            stat_3d,
+            procrustes=opt.procrustes,
+            refine_dir=opt.refine_dir)
 
         # update log file
         logger.append([epoch + 1, lr_now, loss_train, loss_test, err_test],
@@ -130,29 +163,42 @@ def main(opt):
         is_best = err_test < err_best
         err_best = min(err_test, err_best)
         if is_best:
-            log.save_ckpt({'epoch': epoch + 1,
-                           'lr': lr_now,
-                           'step': glob_step,
-                           'err': err_best,
-                           'state_dict': model.state_dict(),
-                           'optimizer': optimizer.state_dict()},
-                          ckpt_path=opt.ckpt,
-                          is_best=True)
+            log.save_ckpt(
+                {
+                    'epoch': epoch + 1,
+                    'lr': lr_now,
+                    'step': glob_step,
+                    'err': err_best,
+                    'state_dict': model.state_dict(),
+                    'optimizer': optimizer.state_dict()
+                },
+                ckpt_path=opt.ckpt,
+                is_best=True)
         else:
-            log.save_ckpt({'epoch': epoch + 1,
-                           'lr': lr_now,
-                           'step': glob_step,
-                           'err': err_best,
-                           'state_dict': model.state_dict(),
-                           'optimizer': optimizer.state_dict()},
-                          ckpt_path=opt.ckpt,
-                          is_best=False)
+            log.save_ckpt(
+                {
+                    'epoch': epoch + 1,
+                    'lr': lr_now,
+                    'step': glob_step,
+                    'err': err_best,
+                    'state_dict': model.state_dict(),
+                    'optimizer': optimizer.state_dict()
+                },
+                ckpt_path=opt.ckpt,
+                is_best=False)
 
     logger.close()
 
 
-def train(train_loader, model, criterion, optimizer,
-          lr_init=None, lr_now=None, glob_step=None, lr_decay=None, gamma=None,
+def train(train_loader,
+          model,
+          criterion,
+          optimizer,
+          lr_init=None,
+          lr_now=None,
+          glob_step=None,
+          lr_decay=None,
+          gamma=None,
           max_norm=True):
     losses = utils.AverageMeter()
 
@@ -165,7 +211,8 @@ def train(train_loader, model, criterion, optimizer,
     for i, (inps, tars) in enumerate(train_loader):
         glob_step += 1
         if glob_step % lr_decay == 0 or glob_step == 1:
-            lr_now = utils.lr_decay(optimizer, glob_step, lr_init, lr_decay, gamma)
+            lr_now = utils.lr_decay(optimizer, glob_step, lr_init, lr_decay,
+                                    gamma)
         inputs = Variable(inps.cuda())
         targets = Variable(tars.cuda(async=True))
 
@@ -198,7 +245,12 @@ def train(train_loader, model, criterion, optimizer,
     return glob_step, lr_now, losses.avg
 
 
-def test(test_loader, model, criterion, stat_3d, procrustes=False):
+def test(test_loader,
+         model,
+         criterion,
+         stat_3d,
+         procrustes=False,
+         refine_dir=None):
     losses = utils.AverageMeter()
 
     model.eval()
@@ -207,6 +259,11 @@ def test(test_loader, model, criterion, stat_3d, procrustes=False):
     start = time.time()
     batch_time = 0
     bar = Bar('>>>', fill='>', max=len(test_loader))
+
+    if refine_dir:
+        refine_dic_path = os.path.join(refine_dir, 'train', 'D.pkl')
+        with open(refine_dic_path, 'rb') as f:
+            refine_dic = pickle.load(f)['D']
 
     for i, (inps, tars) in enumerate(test_loader):
         inputs = Variable(inps.cuda())
@@ -223,14 +280,21 @@ def test(test_loader, model, criterion, stat_3d, procrustes=False):
         tars = targets
 
         # calculate erruracy
-        targets_unnorm = data_process.unNormalizeData(tars.data.cpu().numpy(), stat_3d['mean'], stat_3d['std'], stat_3d['dim_use'])
-        outputs_unnorm = data_process.unNormalizeData(outputs.data.cpu().numpy(), stat_3d['mean'], stat_3d['std'], stat_3d['dim_use'])
+        targets_unnorm = data_process.unNormalizeData(
+            tars.data.cpu().numpy(), stat_3d['mean'], stat_3d['std'],
+            stat_3d['dim_use'])
+        outputs_unnorm = data_process.unNormalizeData(
+            outputs.data.cpu().numpy(), stat_3d['mean'], stat_3d['std'],
+            stat_3d['dim_use'])
 
         # remove dim ignored
         dim_use = np.hstack((np.arange(3), stat_3d['dim_use']))
 
         outputs_use = outputs_unnorm[:, dim_use]
         targets_use = targets_unnorm[:, dim_use]
+
+        if refine_dir:
+            outputs_use = ru.refine(outputs_use, refine_dic)
 
         if procrustes:
             for ba in range(inps.size(0)):
@@ -240,7 +304,7 @@ def test(test_loader, model, criterion, stat_3d, procrustes=False):
                 out = (b * out.dot(T)) + c
                 outputs_use[ba, :] = out.reshape(1, 51)
 
-        sqerr = (outputs_use - targets_use) ** 2
+        sqerr = (outputs_use - targets_use)**2
 
         distance = np.zeros((sqerr.shape[0], 17))
         dist_idx = 0
@@ -267,7 +331,7 @@ def test(test_loader, model, criterion, stat_3d, procrustes=False):
     joint_err = np.mean(all_dist, axis=0)
     ttl_err = np.mean(all_dist)
     bar.finish()
-    print (">>> error: {} <<<".format(ttl_err))
+    print(">>> error: {} <<<".format(ttl_err))
     return losses.avg, ttl_err
 
 
