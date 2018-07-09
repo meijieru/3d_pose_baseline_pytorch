@@ -317,7 +317,7 @@ def test(test_loader,
             for ba in range(inps.size(0)):
                 gt = targets_use[ba].reshape(-1, 3)
                 out = outputs_use[ba].reshape(-1, 3)
-                _, Z, T, b, c = get_transformation(gt, out, True)
+                _, Z, T, b, c = get_transformation(gt, out, True, reflection=False)
                 out = (b * out.dot(T)) + c
                 outputs_use[ba, :] = out.reshape(1, 51)
 

@@ -45,9 +45,12 @@ def refine(output, dic, coeff_fun, verbose_info=False):
     coeff = coeff_fun(dist_matrix, dic)
     dist_matrix_recon = np.dot(dic, coeff)
 
-    pose_recon = np.stack([
-        pu.matrix_to_pose(dmat, triu=True) for dmat in dist_matrix_recon.T
-    ]).reshape([batch_size, -1])
+    align_list = []
+    for dmat, pose_gt in zip(dist_matrix_recon.T, seq):
+        recon = pu.matrix_to_pose(dmat, triu=True)
+        align = pu.align_to_gt(recon, pose_gt)
+        align_list.append(align)
+    pose_recon = np.stack(align_list).reshape([batch_size, -1])
 
     extra_info = {}
     if verbose_info:
