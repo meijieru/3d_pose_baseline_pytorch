@@ -65,7 +65,8 @@ def main(opt):
         logger = log.Logger(os.path.join(opt.ckpt, 'log.txt'), resume=True)
     else:
         logger = log.Logger(os.path.join(opt.ckpt, 'log.txt'))
-        logger.set_names(['epoch', 'lr', 'loss_train', 'loss_test', 'err_test'])
+        logger.set_names(
+            ['epoch', 'lr', 'loss_train', 'loss_test', 'err_test'])
 
     # list of action(s)
     actions = misc.define_actions(opt.action)
@@ -80,26 +81,8 @@ def main(opt):
     stat_3d = torch.load(os.path.join(opt.data_dir, 'stat_3d.pth.tar'))
     # test
     if opt.test:
-        if opt.refine_dir:
-            refine_dir = os.path.join(opt.refine_dir, 'train')
-            refine_dic_path = os.path.join(refine_dir, 'D.pkl')
-            with open(refine_dic_path, 'rb') as f:
-                refine_dic = pickle.load(f)['D']
-
-            refine_config = ru.get_refine_config(refine_dir)
-            refine_per_action = refine_config['per_action']
-
-            if opt.refine_method:
-                method = opt.refine_method
-                method_params = None
-            else:  # fallback to training params
-                method = refine_config['method']
-                method_params = refine_config['method_params']
-            refine_coeff_fun = ru.get_coeff_fun(method, method_params)
-        else:
-            refine_dic = None
-            refine_per_action = False
-            refine_coeff_fun = None
+        refine_dic, refine_per_action, coeff_funs, refine_extra_kwargs = ru.get_refine_config(
+            opt)
 
         err_set = []
         for action in actions:
@@ -116,8 +99,11 @@ def main(opt):
                 pin_memory=True)
 
             refine_idx_action = ru.get_idx_action(action)
-            refine_dic_i = refine_dic[
-                refine_idx_action] if refine_per_action else refine_dic
+            if refine_per_action:
+                refine_dic_i = refine_dic[refine_idx_action]
+            else:
+                refine_dic_i = refine_dic
+            coeff_fun_i = coeff_funs[refine_idx_action]
             _, err_test = test(
                 test_loader,
                 model,
@@ -125,7 +111,8 @@ def main(opt):
                 stat_3d,
                 procrustes=opt.procrustes,
                 refine_dic=refine_dic_i,
-                refine_coeff_fun=refine_coeff_fun)
+                refine_coeff_fun=coeff_fun_i,
+                refine_extra_kwargs=refine_extra_kwargs)
             err_set.append(err_test)
         print(">>>>>> TEST results:")
         for action in actions:
@@ -184,29 +171,27 @@ def main(opt):
         is_best = err_test < err_best
         err_best = min(err_test, err_best)
         if is_best:
-            log.save_ckpt(
-                {
-                    'epoch': epoch + 1,
-                    'lr': lr_now,
-                    'step': glob_step,
-                    'err': err_best,
-                    'state_dict': model.state_dict(),
-                    'optimizer': optimizer.state_dict()
-                },
-                ckpt_path=opt.ckpt,
-                is_best=True)
+            log.save_ckpt({
+                'epoch': epoch + 1,
+                'lr': lr_now,
+                'step': glob_step,
+                'err': err_best,
+                'state_dict': model.state_dict(),
+                'optimizer': optimizer.state_dict()
+            },
+                          ckpt_path=opt.ckpt,
+                          is_best=True)
         else:
-            log.save_ckpt(
-                {
-                    'epoch': epoch + 1,
-                    'lr': lr_now,
-                    'step': glob_step,
-                    'err': err_best,
-                    'state_dict': model.state_dict(),
-                    'optimizer': optimizer.state_dict()
-                },
-                ckpt_path=opt.ckpt,
-                is_best=False)
+            log.save_ckpt({
+                'epoch': epoch + 1,
+                'lr': lr_now,
+                'step': glob_step,
+                'err': err_best,
+                'state_dict': model.state_dict(),
+                'optimizer': optimizer.state_dict()
+            },
+                          ckpt_path=opt.ckpt,
+                          is_best=False)
 
     logger.close()
 
@@ -272,7 +257,8 @@ def test(test_loader,
          stat_3d,
          procrustes=False,
          refine_dic=None,
-         refine_coeff_fun=None):
+         refine_coeff_fun=None,
+         refine_extra_kwargs={}):
     losses = utils.AverageMeter()
 
     model.eval()
@@ -292,7 +278,7 @@ def test(test_loader,
         outputs_coord = outputs
         loss = criterion(outputs_coord, targets)
 
-        losses.update(loss.data[0], inputs.size(0))
+        losses.update(loss.item(), inputs.size(0))
 
         tars = targets
 
@@ -311,13 +297,15 @@ def test(test_loader,
         targets_use = targets_unnorm[:, dim_use]
 
         if refine_dic is not None:
-            outputs_use, _ = ru.refine(outputs_use, refine_dic, refine_coeff_fun)
+            outputs_use, _ = ru.refine(outputs_use, refine_dic,
+                                       refine_coeff_fun, **refine_extra_kwargs)
 
         if procrustes:
             for ba in range(inps.size(0)):
                 gt = targets_use[ba].reshape(-1, 3)
                 out = outputs_use[ba].reshape(-1, 3)
-                _, Z, T, b, c = get_transformation(gt, out, True, reflection=False)
+                _, Z, T, b, c = get_transformation(
+                    gt, out, True, reflection=False)
                 out = (b * out.dot(T)) + c
                 outputs_use[ba, :] = out.reshape(1, 51)
 
