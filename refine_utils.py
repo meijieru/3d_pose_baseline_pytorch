@@ -105,7 +105,7 @@ def refine(output,
         recons = [pu.matrix_to_pose(dmat, triu=True) for dmat in recons]
 
     align_list = []
-    for recon, pose_gt in zip(recons.T, seq.T):
+    for recon, pose_gt in zip(recons.T, output):
         align = pu.align_to_gt(recon.reshape([-1, 3]), pose_gt.reshape([-1, 3]))
         align_list.append(align)
     pose_recon = np.stack(align_list).reshape([batch_size, -1])

@@ -138,6 +138,7 @@ def main(opt):
         for pck in pck_set:
             print("{:.4f}".format(pck), end='\t')
         print(">>>\nERRORS: {}".format(np.array(err_set).mean()))
+        print(">>>\nPCKS: {}".format(np.array(pck_set).mean()))
         sys.exit()
 
     # load dadasets for training
