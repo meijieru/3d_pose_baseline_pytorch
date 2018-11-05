@@ -56,7 +56,7 @@ class Human36M(Dataset):
             self.test_3d = torch.load(os.path.join(data_path, 'test_3d.pth.tar'))
             self.test_2d = torch.load(os.path.join(data_path, test_2d_file))
             for k2d in self.test_2d.keys():
-                (sub, act, fname) = k2d
+                (sub, act, fname) = k2d[:3]
                 if act not in self.actions:
                     continue
                 k3d = k2d
