@@ -30,6 +30,19 @@ from src.datasets.human36m import Human36M
 import refine_utils as ru
 
 
+def mpjpe_fun(lhs, rhs):
+    """Mean distance of each joints."""
+    dist = np.sqrt(np.sum(np.square(lhs - rhs), axis=-1))
+    return np.mean(dist)
+
+
+def pck_fun(lhs, rhs, threshold=150):
+    """Percentage of correct keypoints."""
+    n_joint, _ = lhs.shape
+    dist = np.sqrt(np.sum(np.square(lhs - rhs), axis=-1))
+    return np.sum(dist <= threshold) / float(n_joint)
+
+
 def main(opt):
     start_epoch = 0
     err_best = 1000
@@ -65,8 +78,7 @@ def main(opt):
         logger = log.Logger(os.path.join(opt.ckpt, 'log.txt'), resume=True)
     else:
         logger = log.Logger(os.path.join(opt.ckpt, 'log.txt'))
-        logger.set_names(
-            ['epoch', 'lr', 'loss_train', 'loss_test', 'err_test'])
+        logger.set_names(['epoch', 'lr', 'loss_train', 'loss_test', 'err_test'])
 
     # list of action(s)
     actions = misc.define_actions(opt.action)
@@ -85,6 +97,7 @@ def main(opt):
             opt)
 
         err_set = []
+        pck_set = []
         for action in actions:
             print(">>> TEST on _{}_".format(action))
             test_loader = DataLoader(
@@ -104,7 +117,7 @@ def main(opt):
             else:
                 refine_dic_i = refine_dic
             coeff_fun_i = coeff_funs[refine_idx_action]
-            _, err_test = test(
+            _, err_test, pck_test = test(
                 test_loader,
                 model,
                 criterion,
@@ -114,12 +127,16 @@ def main(opt):
                 refine_coeff_fun=coeff_fun_i,
                 refine_extra_kwargs=refine_extra_kwargs)
             err_set.append(err_test)
+            pck_set.append(pck_test)
         print(">>>>>> TEST results:")
         for action in actions:
             print("{}".format(action), end='\t')
         print("\n")
         for err in err_set:
             print("{:.4f}".format(err), end='\t')
+        print("\n")
+        for pck in pck_set:
+            print("{:.4f}".format(pck), end='\t')
         print(">>>\nERRORS: {}".format(np.array(err_set).mean()))
         sys.exit()
 
@@ -160,12 +177,13 @@ def main(opt):
             lr_decay=opt.lr_decay,
             gamma=opt.lr_gamma,
             max_norm=opt.max_norm)
-        loss_test, err_test = test(
+        loss_test, err_test, pck_test = test(
             test_loader, model, criterion, stat_3d, procrustes=opt.procrustes)
 
         # update log file
-        logger.append([epoch + 1, lr_now, loss_train, loss_test, err_test],
-                      ['int', 'float', 'float', 'flaot', 'float'])
+        logger.append(
+            [epoch + 1, lr_now, loss_train, loss_test, err_test, pck_test],
+            ['int', 'float', 'float', 'float', 'float', 'float'])
 
         # save ckpt
         is_best = err_test < err_best
@@ -263,7 +281,7 @@ def test(test_loader,
 
     model.eval()
 
-    all_dist = []
+    all_dist, all_pck = [], []
     start = time.time()
     batch_time = 0
     bar = Bar('>>>', fill='>', max=len(test_loader))
@@ -309,14 +327,10 @@ def test(test_loader,
                 out = (b * out.dot(T)) + c
                 outputs_use[ba, :] = out.reshape(1, 51)
 
-        sqerr = (outputs_use - targets_use)**2
-
-        distance = np.zeros((sqerr.shape[0], 17))
-        dist_idx = 0
-        for k in np.arange(0, 17 * 3, 3):
-            distance[:, dist_idx] = np.sqrt(np.sum(sqerr[:, k:k + 3], axis=1))
-            dist_idx += 1
-        all_dist.append(distance)
+        for pred, gt in zip(outputs_use, targets_use):
+            pred, gt = pred.reshape([-1, 3]), gt.reshape([-1, 3])
+            all_dist.append(mpjpe_fun(pred, gt))
+            all_pck.append(pck_fun(pred, gt, threshold=150))
 
         # update summary
         if (i + 1) % 100 == 0:
@@ -333,11 +347,11 @@ def test(test_loader,
         bar.next()
 
     all_dist = np.vstack(all_dist)
-    joint_err = np.mean(all_dist, axis=0)
-    ttl_err = np.mean(all_dist)
+    mpjpe = np.mean(all_dist)
+    pck = np.mean(all_pck)
     bar.finish()
-    print(">>> error: {} <<<".format(ttl_err))
-    return losses.avg, ttl_err
+    print(">>> error: {}, pck: {} <<<".format(mpjpe, pck))
+    return losses.avg, mpjpe, pck
 
 
 if __name__ == "__main__":
