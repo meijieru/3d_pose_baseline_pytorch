@@ -39,15 +39,31 @@ def get_refine_config(opt):
                 raise ValueError()
             simp_path = os.path.join(opt.refine_dir, 'merged/merged.pkl')
             simp_data = general.get_pickle(simp_path)['merged']['simplices']
-            # FIXME(meijieru): tune the parameters
             method = 'simplices'
 
             if not per_action:
+                basis_map = cpp.cal_basis_map(simp_data, dic.shape[1])
                 simp_data = {k: simp_data for k in actions}
-            coeff_funs = {
-                k: (lambda data, dic: cpp.decomp_simplices_naive(data, dic, simp_data[k], cpp.cal_basis_map(simp_data[k], dic.shape[1]), top_k=20))
-                for k in actions
-            }
+                basis_map = {k: basis_map for k in actions}
+            else:
+                basis_map = {
+                    k: cpp.cal_basis_map(simp_data[k], dic[k].shape[1])
+                    for k in actions
+                }
+
+            if opt.refine_penalty_fun == 'none':
+                coeff_funs = {
+                    # FIXME(meijieru): tune the parameters
+                    k: (lambda data, dic: cpp.decomp_simplices_naive(data, dic, simp_data[k], basis_map[k], top_k=20))
+                    for k in actions
+                }
+            else:
+                penalty_fun = general.get_penalty_fun(opt.refine_penalty_fun)
+                coeff_funs = {
+                    # FIXME(meijieru): tune the parameters
+                    k: (lambda data, dic: cpp.decomp_simplices(data, dic, simp_data[k], basis_map[k], top_k=20, penalty_fun=penalty_fun))
+                    for k in actions
+                }
         else:
             if opt.refine_method:
                 method = opt.refine_method

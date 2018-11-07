@@ -36,11 +36,13 @@ def mpjpe_fun(lhs, rhs):
     return np.mean(dist)
 
 
-def pck_fun(lhs, rhs, threshold=150):
+def pck_fun(lhs, rhs, thresholds):
     """Percentage of correct keypoints."""
     n_joint, _ = lhs.shape
     dist = np.sqrt(np.sum(np.square(lhs - rhs), axis=-1))
-    return np.sum(dist <= threshold) / float(n_joint)
+    return [
+        np.sum(dist <= threshold) / float(n_joint) for threshold in thresholds
+    ]
 
 
 def main(opt):
@@ -95,6 +97,7 @@ def main(opt):
     if opt.test:
         refine_dic, refine_per_action, coeff_funs, refine_extra_kwargs = ru.get_refine_config(
             opt)
+        pck_thresholds = [50, 100, 150, 200, 250]
 
         err_set = []
         pck_set = []
@@ -108,7 +111,6 @@ def main(opt):
                     is_train=False),
                 batch_size=opt.test_batch,
                 shuffle=False,
-                num_workers=opt.job,
                 pin_memory=True)
 
             refine_idx_action = ru.get_idx_action(action)
@@ -123,6 +125,7 @@ def main(opt):
                 criterion,
                 stat_3d,
                 procrustes=opt.procrustes,
+                pck_thresholds=pck_thresholds,
                 refine_dic=refine_dic_i,
                 refine_coeff_fun=coeff_fun_i,
                 refine_extra_kwargs=refine_extra_kwargs)
@@ -130,15 +133,18 @@ def main(opt):
             pck_set.append(pck_test)
         print(">>>>>> TEST results:")
         for action in actions:
-            print("{}".format(action), end='\t')
+            print("{}".format(action[:7]), end='\t')
         print("\n")
         for err in err_set:
-            print("{:.4f}".format(err), end='\t')
-        print("\n")
-        for pck in pck_set:
-            print("{:.4f}".format(pck), end='\t')
-        print(">>>\nERRORS: {}".format(np.array(err_set).mean()))
-        print(">>>\nPCKS: {}".format(np.array(pck_set).mean()))
+            print("{:7.4f}".format(err), end='\t')
+        print(">>> ERRORS: {}".format(np.array(err_set).mean()))
+
+        for i, thres in enumerate(pck_thresholds):
+            for pck in pck_set:
+                print("{:7.4f}".format(pck[i]), end='\t')
+            print(">>> PCKS {}: {}".format(thres,
+                                           np.mean(
+                                               [pck[i] for pck in pck_set])))
         sys.exit()
 
     # load dadasets for training
@@ -275,18 +281,15 @@ def test(test_loader,
          criterion,
          stat_3d,
          procrustes=False,
+         pck_thresholds=[50, 100, 150, 200, 250],
          refine_dic=None,
          refine_coeff_fun=None,
          refine_extra_kwargs={}):
-    losses = utils.AverageMeter()
-
     model.eval()
 
-    all_dist, all_pck = [], []
-    start = time.time()
-    batch_time = 0
-    bar = Bar('>>>', fill='>', max=len(test_loader))
-
+    all_outputs = []
+    all_targets = []
+    losses = utils.AverageMeter()
     for i, (inps, tars) in enumerate(test_loader):
         inputs = Variable(inps.cuda())
         targets = Variable(tars.cuda(async=True))
@@ -296,7 +299,6 @@ def test(test_loader,
         # calculate loss
         outputs_coord = outputs
         loss = criterion(outputs_coord, targets)
-
         losses.update(loss.item(), inputs.size(0))
 
         tars = targets
@@ -315,43 +317,60 @@ def test(test_loader,
         outputs_use = outputs_unnorm[:, dim_use]
         targets_use = targets_unnorm[:, dim_use]
 
+        all_outputs.append(outputs_use)
+        all_targets.append(targets_use)
+
+    accu_frames = np.cumsum(test_loader.dataset.frames)
+    all_outputs = np.split(np.concatenate(all_outputs, axis=0),
+                           accu_frames)[:-1]
+    all_targets = np.split(np.concatenate(all_targets, axis=0),
+                           accu_frames)[:-1]
+
+    start = time.time()
+    seq_time = 0
+    bar = Bar('>>>', fill='>', max=len(all_outputs))
+
+    all_dist, all_pck = [], []
+    for i, (outputs_use, targets_use) in enumerate(
+            zip(all_outputs, all_targets)):
         if refine_dic is not None:
             outputs_use, _ = ru.refine(outputs_use, refine_dic,
                                        refine_coeff_fun, **refine_extra_kwargs)
 
         if procrustes:
-            for ba in range(inps.size(0)):
-                gt = targets_use[ba].reshape(-1, 3)
-                out = outputs_use[ba].reshape(-1, 3)
+            for frame in range(outputs_use.shape[0]):
+                gt = targets_use[frame].reshape(-1, 3)
+                out = outputs_use[frame].reshape(-1, 3)
                 _, Z, T, b, c = get_transformation(
                     gt, out, True, reflection=False)
                 out = (b * out.dot(T)) + c
-                outputs_use[ba, :] = out.reshape(1, 51)
+                outputs_use[frame, :] = out.reshape(1, 51)
 
         for pred, gt in zip(outputs_use, targets_use):
             pred, gt = pred.reshape([-1, 3]), gt.reshape([-1, 3])
             all_dist.append(mpjpe_fun(pred, gt))
-            all_pck.append(pck_fun(pred, gt, threshold=150))
+            all_pck.append(pck_fun(pred, gt, thresholds=pck_thresholds))
 
         # update summary
-        if (i + 1) % 100 == 0:
-            batch_time = time.time() - start
-            start = time.time()
+        seq_time = time.time() - start
+        start = time.time()
 
-        bar.suffix = '({batch}/{size}) | batch: {batchtime:.4}ms | Total: {ttl} | ETA: {eta:} | loss: {loss:.6f}' \
-            .format(batch=i + 1,
-                    size=len(test_loader),
-                    batchtime=batch_time * 10.0,
+        bar.suffix = '({seq}/{size}) | seq: {seqtime:.4}ms | Total: {ttl} | ETA: {eta:} | mpjpe: {loss:.6f}' \
+            .format(seq=i + 1,
+                    size=len(all_outputs),
+                    seqtime=seq_time * 10.0,
                     ttl=bar.elapsed_td,
                     eta=bar.eta_td,
-                    loss=losses.avg)
+                    loss=np.mean(all_dist))
         bar.next()
 
     all_dist = np.vstack(all_dist)
+    all_pck = np.array(all_pck)
     mpjpe = np.mean(all_dist)
-    pck = np.mean(all_pck)
+    pck = np.mean(all_pck, axis=0)
     bar.finish()
-    print(">>> error: {}, pck: {} <<<".format(mpjpe, pck))
+    print(">>> error: {:4f}, pck: {} <<<".format(
+        mpjpe, ' '.join(['{:4f}'.format(val) for val in pck])))
     return losses.avg, mpjpe, pck
 
 

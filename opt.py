@@ -70,6 +70,7 @@ class Options:
         self.parser.add_argument('--procrustes',     dest='procrustes', action='store_true', help='use procrustes analysis at testing')
         self.parser.add_argument('--refine_dir',     type=str, help='directory of simplices for refinement')
         self.parser.add_argument('--refine_method',  type=str, help='method to compute the coefficient, use train config if not set')
+        self.parser.add_argument('--refine_penalty_fun',  type=str, default='constant', help='penalty function for discontinuity simplices')
         self.parser.add_argument('--refine_use_simplices', action='store_true', help='whether to use simplices reconstruction')
 
     def _print(self):
