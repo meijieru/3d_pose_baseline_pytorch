@@ -3,15 +3,16 @@
 from __future__ import print_function, absolute_import
 
 import os
+import numpy as np
 import torch
 from torch.utils.data import Dataset
-
 
 TRAIN_SUBJECTS = [1, 5, 6, 7, 8]
 TEST_SUBJECTS = [9, 11]
 
 
 class Human36M(Dataset):
+
     def __init__(self, actions, data_path, use_hg=True, is_train=True):
         """
         :param actions: list of actions to use
@@ -28,6 +29,7 @@ class Human36M(Dataset):
 
         self.train_inp, self.train_out, self.test_inp, self.test_out = [], [], [], []
         self.train_meta, self.test_meta = [], []
+        self.frames = []
 
         # loading data
         if self.use_hg:
@@ -39,21 +41,23 @@ class Human36M(Dataset):
 
         if self.is_train:
             # load train data
-            self.train_3d = torch.load(os.path.join(data_path, 'train_3d.pth.tar'))
+            self.train_3d = torch.load(
+                os.path.join(data_path, 'train_3d.pth.tar'))
             self.train_2d = torch.load(os.path.join(data_path, train_2d_file))
             for k2d in self.train_2d.keys():
                 (sub, act, fname) = k2d
                 k3d = k2d
                 k3d = (sub, act, fname[:-3]) if fname.endswith('-sh') else k3d
                 num_f, _ = self.train_2d[k2d].shape
-                assert self.train_3d[k3d].shape[0] == self.train_2d[k2d].shape[0], '(training) 3d & 2d shape not matched'
-                for i in range(num_f):
-                    self.train_inp.append(self.train_2d[k2d][i])
-                    self.train_out.append(self.train_3d[k3d][i])
-
+                assert self.train_3d[k3d].shape[0] == self.train_2d[k2d].shape[
+                    0], '(training) 3d & 2d shape not matched'
+                self.train_inp.append(self.train_2d[k2d])
+                self.train_out.append(self.train_3d[k3d])
+                self.frames.append(num_f)
         else:
             # load test data
-            self.test_3d = torch.load(os.path.join(data_path, 'test_3d.pth.tar'))
+            self.test_3d = torch.load(
+                os.path.join(data_path, 'test_3d.pth.tar'))
             self.test_2d = torch.load(os.path.join(data_path, test_2d_file))
             for k2d in self.test_2d.keys():
                 (sub, act, fname) = k2d[:3]
@@ -62,24 +66,23 @@ class Human36M(Dataset):
                 k3d = k2d
                 k3d = (sub, act, fname[:-3]) if fname.endswith('-sh') else k3d
                 num_f, _ = self.test_2d[k2d].shape
-                assert self.test_2d[k2d].shape[0] == self.test_3d[k3d].shape[0], '(test) 3d & 2d shape not matched'
-                for i in range(num_f):
-                    self.test_inp.append(self.test_2d[k2d][i])
-                    self.test_out.append(self.test_3d[k3d][i])
+                assert self.test_2d[k2d].shape[0] == self.test_3d[k3d].shape[
+                    0], '(test) 3d & 2d shape not matched'
+                self.test_inp.append(self.test_2d[k2d])
+                self.test_out.append(self.test_3d[k3d])
+                self.frames.append(num_f)
+        self.accum_frames = np.cumsum([0] + self.frames)
 
     def __getitem__(self, index):
+        idx_seq = np.argmax(self.accum_frames >= index + 1) - 1
+        index -= self.accum_frames[idx_seq]
         if self.is_train:
-            inputs = torch.from_numpy(self.train_inp[index]).float()
-            outputs = torch.from_numpy(self.train_out[index]).float()
-
+            inputs = torch.from_numpy(self.train_inp[idx_seq][index]).float()
+            outputs = torch.from_numpy(self.train_out[idx_seq][index]).float()
         else:
-            inputs = torch.from_numpy(self.test_inp[index]).float()
-            outputs = torch.from_numpy(self.test_out[index]).float()
-
+            inputs = torch.from_numpy(self.test_inp[idx_seq][index]).float()
+            outputs = torch.from_numpy(self.test_out[idx_seq][index]).float()
         return inputs, outputs
 
     def __len__(self):
-        if self.is_train:
-            return len(self.train_inp)
-        else:
-            return len(self.test_inp)
+        return self.accum_frames[-1]
