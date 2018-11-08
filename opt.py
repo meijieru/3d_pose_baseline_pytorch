@@ -68,6 +68,7 @@ class Options:
         self.parser.add_argument('--max',            dest='max_norm', action='store_true', help='if use max_norm clip on grad')
         self.parser.set_defaults(max_norm=True)
         self.parser.add_argument('--procrustes',     dest='procrustes', action='store_true', help='use procrustes analysis at testing')
+        self.parser.add_argument('--noise_level',    type=float,  default=0)
         self.parser.add_argument('--refine_dir',     type=str, help='directory of simplices for refinement')
         self.parser.add_argument('--refine_method',  type=str, help='method to compute the coefficient, use train config if not set')
         self.parser.add_argument('--refine_penalty_fun',  type=str, default='constant', help='penalty function for discontinuity simplices')

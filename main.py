@@ -45,11 +45,23 @@ def pck_fun(lhs, rhs, thresholds):
     ]
 
 
+def add_gaussion_noise(arr, mean=0.0, percent=1):
+    arr_np = arr.detach().cpu().numpy()
+    low = np.percentile(arr_np, 5)
+    up = np.percentile(arr_np, 95)
+    scale = (up - low) / 2.0 * percent / 100
+    return arr + torch.normal(mean, torch.full_like(arr, scale))
+
+
 def main(opt):
     start_epoch = 0
     err_best = 1000
     glob_step = 0
     lr_now = opt.lr
+
+    manual_seed = 1234
+    np.random.seed(manual_seed)
+    torch.manual_seed(manual_seed)
 
     # save options
     log.save_options(opt, opt.ckpt)
@@ -98,6 +110,7 @@ def main(opt):
         refine_dic, refine_per_action, coeff_funs, refine_extra_kwargs = ru.get_refine_config(
             opt)
         pck_thresholds = [50, 100, 150, 200, 250]
+        noise_fun = lambda x: add_gaussion_noise(x, percent=opt.noise_level)
 
         err_set = []
         pck_set = []
@@ -125,6 +138,7 @@ def main(opt):
                 criterion,
                 stat_3d,
                 procrustes=opt.procrustes,
+                noise_fun=noise_fun,
                 pck_thresholds=pck_thresholds,
                 refine_dic=refine_dic_i,
                 refine_coeff_fun=coeff_fun_i,
@@ -282,6 +296,7 @@ def test(test_loader,
          stat_3d,
          procrustes=False,
          pck_thresholds=[50, 100, 150, 200, 250],
+         noise_fun=lambda x: x,
          refine_dic=None,
          refine_coeff_fun=None,
          refine_extra_kwargs={}):
@@ -291,7 +306,8 @@ def test(test_loader,
     all_targets = []
     losses = utils.AverageMeter()
     for i, (inps, tars) in enumerate(test_loader):
-        inputs = Variable(inps.cuda())
+        inps_noise = noise_fun(inps)
+        inputs = Variable(inps_noise.cuda())
         targets = Variable(tars.cuda(async=True))
 
         outputs = model(inputs)
@@ -355,10 +371,10 @@ def test(test_loader,
         seq_time = time.time() - start
         start = time.time()
 
-        bar.suffix = '({seq}/{size}) | seq: {seqtime:.4}ms | Total: {ttl} | ETA: {eta:} | mpjpe: {loss:.6f}' \
+        bar.suffix = '({seq}/{size}) | seq: {seqtime:.4}s | Total: {ttl} | ETA: {eta:} | mpjpe: {loss:.6f}' \
             .format(seq=i + 1,
                     size=len(all_outputs),
-                    seqtime=seq_time * 10.0,
+                    seqtime=seq_time,
                     ttl=bar.elapsed_td,
                     eta=bar.eta_td,
                     loss=np.mean(all_dist))
