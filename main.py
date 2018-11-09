@@ -66,14 +66,15 @@ def main(opt):
     # save options
     log.save_options(opt, opt.ckpt)
 
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     # create model
     print(">>> creating model")
     model = LinearModel()
-    model = model.cuda()
+    model = model.to(device)
     model.apply(weight_init)
     print(">>> total params: {:.2f}M".format(
         sum(p.numel() for p in model.parameters()) / 1000000.0))
-    criterion = nn.MSELoss(size_average=True).cuda()
+    criterion = nn.MSELoss(size_average=True).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=opt.lr)
 
     # load ckpt
@@ -137,6 +138,7 @@ def main(opt):
                 model,
                 criterion,
                 stat_3d,
+                device,
                 procrustes=opt.procrustes,
                 noise_fun=noise_fun,
                 pck_thresholds=pck_thresholds,
@@ -192,6 +194,7 @@ def main(opt):
             model,
             criterion,
             optimizer,
+            device,
             lr_init=opt.lr,
             lr_now=lr_now,
             glob_step=glob_step,
@@ -199,7 +202,12 @@ def main(opt):
             gamma=opt.lr_gamma,
             max_norm=opt.max_norm)
         loss_test, err_test, pck_test = test(
-            test_loader, model, criterion, stat_3d, procrustes=opt.procrustes)
+            test_loader,
+            model,
+            criterion,
+            stat_3d,
+            device,
+            procrustes=opt.procrustes)
 
         # update log file
         logger.append(
@@ -239,6 +247,7 @@ def train(train_loader,
           model,
           criterion,
           optimizer,
+          device,
           lr_init=None,
           lr_now=None,
           glob_step=None,
@@ -258,8 +267,8 @@ def train(train_loader,
         if glob_step % lr_decay == 0 or glob_step == 1:
             lr_now = utils.lr_decay(optimizer, glob_step, lr_init, lr_decay,
                                     gamma)
-        inputs = Variable(inps.cuda())
-        targets = Variable(tars.cuda(async=True))
+        inputs = Variable(inps.to(device))
+        targets = Variable(tars.to(device))
 
         outputs = model(inputs)
 
@@ -294,6 +303,7 @@ def test(test_loader,
          model,
          criterion,
          stat_3d,
+         device,
          procrustes=False,
          pck_thresholds=[50, 100, 150, 200, 250],
          noise_fun=lambda x: x,
@@ -307,8 +317,8 @@ def test(test_loader,
     losses = utils.AverageMeter()
     for i, (inps, tars) in enumerate(test_loader):
         inps_noise = noise_fun(inps)
-        inputs = Variable(inps_noise.cuda())
-        targets = Variable(tars.cuda(async=True))
+        inputs = Variable(inps_noise.to(device))
+        targets = Variable(tars.to(device))
 
         outputs = model(inputs)
 
