@@ -133,3 +133,7 @@ def refine(output,
         extra_info['pose_err'] = np.mean(
             pu.align_and_err(pose_recon.T, output.T))
     return pose_recon, extra_info
+
+
+plot_pose_seq = hu.plot_pose_seq
+convert_to_pose_16 = hu.convert_to_pose_16

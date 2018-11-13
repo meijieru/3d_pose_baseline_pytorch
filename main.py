@@ -309,7 +309,8 @@ def test(test_loader,
          noise_fun=lambda x: x,
          refine_dic=None,
          refine_coeff_fun=None,
-         refine_extra_kwargs={}):
+         refine_extra_kwargs={},
+         visualize=False):
     model.eval()
 
     all_outputs = []
@@ -360,8 +361,16 @@ def test(test_loader,
     for i, (outputs_use, targets_use) in enumerate(
             zip(all_outputs, all_targets)):
         if refine_dic is not None:
+            origin = outputs_use
             outputs_use, _ = ru.refine(outputs_use, refine_dic,
                                        refine_coeff_fun, **refine_extra_kwargs)
+
+            if visualize:
+                visual = [
+                    ru.convert_to_pose_16(seq.reshape([-1, 17, 3]))
+                    for seq in [outputs_use, origin, targets_use]
+                ]
+                ru.plot_pose_seq(visual, plot_axis=True, r=1000)
 
         if procrustes:
             for frame in range(outputs_use.shape[0]):
