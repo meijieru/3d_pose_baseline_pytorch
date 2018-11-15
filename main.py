@@ -144,7 +144,8 @@ def main(opt):
                 pck_thresholds=pck_thresholds,
                 refine_dic=refine_dic_i,
                 refine_coeff_fun=coeff_fun_i,
-                refine_extra_kwargs=refine_extra_kwargs)
+                refine_extra_kwargs=refine_extra_kwargs,
+                cache_prefix=action if opt.dump_err else None)
             err_set.append(err_test)
             pck_set.append(pck_test)
         print(">>>>>> TEST results:")
@@ -310,6 +311,7 @@ def test(test_loader,
          refine_dic=None,
          refine_coeff_fun=None,
          refine_extra_kwargs={},
+         cache_prefix=None,
          visualize=False):
     model.eval()
 
@@ -402,6 +404,9 @@ def test(test_loader,
     all_dist = np.vstack(all_dist)
     all_pck = np.array(all_pck)
     mpjpe = np.mean(all_dist)
+    if cache_prefix:
+        with open('cache/{}_.pkl'.format(cache_prefix), 'wb') as f:
+            pickle.dump({'mpjpe': all_dist, 'pck': all_pck}, f)
     pck = np.mean(all_pck, axis=0)
     bar.finish()
     print(">>> error: {:4f}, pck: {} <<<".format(
