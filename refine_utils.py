@@ -21,6 +21,49 @@ def get_idx_action(action):
     return ACTION_CLS_LIST.index(action.lower())
 
 
+def get_refine_model_config(opt):
+
+    def recon_by_pca(data, model_data):
+        model, data_mean = model_data['pca'], model_data['mean']
+        recon = model.inverse_transform(
+            model.transform(data - data_mean.T)) + data_mean.T
+        return recon.T
+
+    num_actions = 15
+    recon_fun_map = {
+        'pca': recon_by_pca,
+    }
+    if opt.refine_dir:
+        train_dir = os.path.join(opt.refine_dir, 'train')
+        model_data = general.get_pickle(os.path.join(train_dir, 'model.pkl'))
+        recon_fun = recon_fun_map[opt.refine_method]
+        return model_data, False, {k: recon_fun for k in range(num_actions)}, {}
+    else:
+        return None, False, defaultdict(lambda: None), {}
+
+
+def refine_by_model(output, model_data, recon_fun, verbose_info=True):
+    batch_size, _ = output.shape
+    seq = hu.pose_preprocess(
+        output.reshape([batch_size, -1, 3]),
+        orthogonal=True).reshape([batch_size, -1])
+    recons = recon_fun(seq, model_data).T
+
+    align_list = []
+    for recon, pose_gt in zip(recons, output):
+        align = pu.align_to_gt(recon.reshape([-1, 3]), pose_gt.reshape([-1, 3]))
+        align_list.append(align)
+    pose_recon = np.stack(align_list).reshape([batch_size, -1])
+
+    extra_info = {}
+    if verbose_info:
+        extra_info['l2_err_dist'] = np.mean(
+            np.sum(np.power(recons - seq, 2), axis=1))
+        extra_info['pose_err'] = np.mean(
+            pu.align_and_err(pose_recon.T, output.T))
+    return pose_recon, extra_info
+
+
 def get_refine_config(opt):
     if opt.refine_dir:
         train_dir = os.path.join(opt.refine_dir, 'train')

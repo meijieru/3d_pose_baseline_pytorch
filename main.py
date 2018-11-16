@@ -108,7 +108,7 @@ def main(opt):
     stat_3d = torch.load(os.path.join(opt.data_dir, 'stat_3d.pth.tar'))
     # test
     if opt.test:
-        refine_dic, refine_per_action, coeff_funs, refine_extra_kwargs = ru.get_refine_config(
+        refine_dic, refine_per_action, coeff_funs, refine_extra_kwargs = ru.get_refine_model_config(
             opt)
         pck_thresholds = [50, 100, 150, 200, 250]
         noise_fun = lambda x: add_gaussion_noise(x, percent=opt.noise_level)
@@ -364,8 +364,9 @@ def test(test_loader,
             zip(all_outputs, all_targets)):
         if refine_dic is not None:
             origin = outputs_use
-            outputs_use, _ = ru.refine(outputs_use, refine_dic,
-                                       refine_coeff_fun, **refine_extra_kwargs)
+            outputs_use, _ = ru.refine_by_model(outputs_use, refine_dic,
+                                                refine_coeff_fun,
+                                                **refine_extra_kwargs)
 
             if visualize:
                 visual = [
