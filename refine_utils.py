@@ -2,6 +2,8 @@ import os
 import sys
 from collections import defaultdict
 import numpy as np
+import torch
+from torch.utils.data import DataLoader
 
 sys.path.append('approximate_archetypal_analysis/src')
 from common import pose_utils as pu
@@ -9,6 +11,8 @@ from common import human36m_utils as hu
 from common import general
 from core import cpp
 from core import op
+from app.ae.dae import AutoEncoder
+from app.ae.dae import NaiveDataset
 
 ACTION_CLS_LIST = [
     "walking", "eating", "smoking", "discussion", "directions", "greeting",
@@ -29,13 +33,39 @@ def get_refine_model_config(opt):
             model.transform(data - data_mean.T)) + data_mean.T
         return recon.T
 
+    def recon_by_dae(data, model_data):
+        dae, device = model_data['dae'], model_data['device']
+        batch_size = 512
+        dst = NaiveDataset(data.T)
+
+        recons = []
+        for poses in DataLoader(dst, batch_size=batch_size, shuffle=False):
+            output = dae(poses.to(device))
+            output = output.detach().cpu().numpy()
+            recons.append(output)
+        recon = np.concatenate(recons, axis=0)
+        return recon.T
+
     num_actions = 15
     recon_fun_map = {
         'pca': recon_by_pca,
+        'dae': recon_by_dae,
     }
     if opt.refine_dir:
         train_dir = os.path.join(opt.refine_dir, 'train')
-        model_data = general.get_pickle(os.path.join(train_dir, 'model.pkl'))
+        if opt.refine_method == 'pca':
+            model_data = general.get_pickle(
+                os.path.join(train_dir, 'model.pkl'))
+        elif opt.refine_method == 'dae':
+            model_data = torch.load(os.path.join(train_dir, 'model.pth'))
+            device = torch.device("cuda:0" if torch.cuda.
+                                  is_available() else "cpu")
+            dae = AutoEncoder(30)
+            dae.load_state_dict(model_data['state_dict'])
+            dae.to(device)
+            model_data = {'dae': dae, 'device': device}
+        else:
+            raise ValueError()
         recon_fun = recon_fun_map[opt.refine_method]
         return model_data, False, {k: recon_fun for k in range(num_actions)}, {}
     else:

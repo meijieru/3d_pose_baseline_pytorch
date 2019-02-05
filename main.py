@@ -153,7 +153,7 @@ def main(opt):
             print("{}".format(action[:7]), end='\t')
         print("\n")
         for err in err_set:
-            print("{:7.4f}".format(err), end='\t')
+            print("{:7.1f}".format(err), end='\t')
         print(">>> ERRORS: {}".format(np.array(err_set).mean()))
 
         for i, thres in enumerate(pck_thresholds):
